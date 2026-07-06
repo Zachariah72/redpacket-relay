@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#c92f36">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="RedPacket Relay">
+    <title>RedPacket Relay</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/redpacket-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/redpacket-icon.svg">
+    <link rel="stylesheet" href="/styles.css?v=25">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div>
+          <h1>RedPacket Relay</h1>
+          <span class="health-tag yellow" id="status">
+            <i></i>
+            Starting
+          </span>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Console sections">
+        <button class="tab active" data-tab="overview" type="button" onclick="openTab('overview')">Overview</button>
+        <button class="tab" data-tab="monitor" type="button" onclick="openTab('monitor')">Monitor</button>
+        <button class="tab" data-tab="transactions" type="button" onclick="openTab('transactions')">Transactions</button>
+        <button class="tab" data-tab="routing" type="button" onclick="openTab('routing')">Routing</button>
+        <button class="tab" data-tab="accounts" type="button" onclick="openTab('accounts')">Accounts</button>
+        <button class="tab" data-tab="merchant" type="button" onclick="openTab('merchant')">Merchant</button>
+        <button class="tab" data-tab="bot-health" type="button" onclick="openTab('bot-health')">Bot Health</button>
+        <button class="tab" data-tab="audit" type="button" onclick="openTab('audit')">Audit</button>
+      </nav>
+      <div class="sidebar-card">
+        <span>Runtime</span>
+        <strong id="side-mode">simulation</strong>
+        <p>Official payment credentials are required before production payout mode.</p>
+      </div>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Operations Console</p>
+          <h2 id="page-title">Overview</h2>
+        </div>
+        <div class="top-actions">
+          <span class="action-message" id="action-message"></span>
+          <button class="ghost install-hidden" id="install-app" type="button">Install App</button>
+          <button class="ghost" id="refresh" type="button">Refresh</button>
+          <button id="sample-event" type="button">Send Sample Match</button>
+        </div>
+      </header>
+
+      <section class="tab-panel active" id="tab-overview">
+        <div class="metrics">
+          <article>
+            <span>Today Volume</span>
+            <strong id="metric-total">0.00 CNY</strong>
+          </article>
+          <article>
+            <span>Created</span>
+            <strong id="metric-created">0</strong>
+          </article>
+          <article>
+            <span>Rejected</span>
+            <strong id="metric-rejected">0</strong>
+          </article>
+          <article>
+            <span>Daily Limit</span>
+            <strong id="metric-limit">0 CNY</strong>
+          </article>
+        </div>
+
+        <div class="split">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>Readiness</h3>
+                <p>Current production blockers and configured controls.</p>
+              </div>
+            </div>
+            <div class="checklist" id="readiness-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>Recent Activity</h3>
+                <p>Latest decisions from authorized event processing.</p>
+              </div>
+            </div>
+            <div class="activity-list" id="recent-activity"></div>
+          </section>
+        </div>
+
+        <div class="overview-operations">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>WeChat Initiation</h3>
+                <p>Runs in the background from the latest accepted payout.</p>
+              </div>
+              <button class="ghost" id="refresh-wechat-handoff" type="button">Refresh</button>
+            </div>
+            <div class="handoff-panel compact-handoff">
+              <span class="eyebrow">Handoff Status</span>
+              <h4 id="wechat-handoff-title">No accepted payout selected</h4>
+              <p id="wechat-handoff-summary">Run a matching event to prepare the WeChat handoff.</p>
+              <div class="handoff-meta" id="wechat-handoff-meta"></div>
+              <div class="hidden-handoff-values" aria-hidden="true">
+                <span id="wechat-envelope-amount">0.00 CNY</span>
+                <span id="wechat-envelope-recipient">Waiting for accepted transaction</span>
+              </div>
+              <div class="button-row handoff-actions">
+                <button id="copy-wechat-reference" type="button">Copy Reference</button>
+                <button class="ghost" id="open-wechat-placeholder" type="button">Initiate WeChat</button>
+              </div>
+              <p class="handoff-note" id="wechat-handoff-note">Official WeChat Pay merchant credentials are required for production payout delivery.</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>Real Scenario Cases</h3>
+                <p>Operational test cases using the same event engine.</p>
+              </div>
+              <button class="ghost" id="run-all-cases" type="button">Run All Cases</button>
+            </div>
+            <div class="case-grid compact-cases">
+              <article class="case-card">
+                <strong>Accepted Target Payout</strong>
+                <p>Authorized source, target amount, valid route and recipients.</p>
+                <button data-case="matched" type="button">Run Case</button>
+              </article>
+              <article class="case-card">
+                <strong>Duplicate Protection</strong>
+                <p>The same external event ID is submitted twice.</p>
+                <button data-case="duplicate" type="button">Run Case</button>
+              </article>
+              <article class="case-card">
+                <strong>Amount Rejection</strong>
+                <p>An authorized event amount does not match target rules.</p>
+                <button data-case="wrong-amount" type="button">Run Case</button>
+              </article>
+              <article class="case-card">
+                <strong>Unauthorized Source</strong>
+                <p>An event arrives from an account that is not authorized.</p>
+                <button data-case="unauthorized" type="button">Run Case</button>
+              </article>
+              <article class="case-card">
+                <strong>Unknown Route</strong>
+                <p>The source account is valid but has no destination rule.</p>
+                <button data-case="unknown-route" type="button">Run Case</button>
+              </article>
+              <article class="case-card">
+                <strong>Offline Pause</strong>
+                <p>The bot is offline and must reject event intake.</p>
+                <button data-case="offline" type="button">Run Case</button>
+              </article>
+            </div>
+            <div class="case-results" id="case-results"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-monitor">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Event Intake</h3>
+              <p>Submit authorized red-packet events to the relay workflow.</p>
+            </div>
+          </div>
+          <form id="event-form" class="form-grid">
+            <label>
+              External Event ID
+              <input name="externalId" required placeholder="wechat-event-001">
+            </label>
+            <label>
+              Source Account
+              <select name="sourceAccountId" required></select>
+            </label>
+            <label>
+              Source Group
+              <select name="sourceGroupId" required></select>
+            </label>
+            <label>
+              Amount
+              <input name="amount" type="number" min="0.01" step="0.01" required placeholder="88">
+            </label>
+            <label class="span-2">
+              Authorized Event Text
+              <input name="rawText" placeholder="Optional event text from an approved source">
+            </label>
+            <button type="submit">Ingest Event</button>
+          </form>
+          <p class="notice" id="event-result"></p>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Event Log</h3>
+              <p>Raw accepted and rejected event decisions.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Decision</th>
+                  <th>External ID</th>
+                  <th>Amount</th>
+                  <th>Account</th>
+                  <th>Source Group</th>
+                  <th>Received</th>
+                </tr>
+              </thead>
+              <tbody id="events"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-transactions">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Transactions</h3>
+              <p>Relay payout records and rejection reasons.</p>
+            </div>
+            <div class="button-row">
+              <button class="ghost" id="export-transactions" type="button">Export CSV</button>
+              <button class="ghost" id="export-state" type="button">Export State</button>
+              <button class="ghost danger" id="reset-demo" type="button">Reset Demo</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>External ID</th>
+                  <th>Amount</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Provider Batch</th>
+                  <th>Date & Time</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="transactions"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-routing">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Routing Rules</h3>
+              <p>Map authorized source groups to destination groups and recipients.</p>
+            </div>
+            <button id="save-routing" type="button">Save Routing</button>
+          </div>
+          <div class="form-grid compact">
+            <label>
+              Target Amounts
+              <input id="target-amounts" placeholder="88, 168, 188">
+            </label>
+            <label>
+              Daily Limit
+              <input id="daily-limit" type="number" min="1" step="1">
+            </label>
+            <label>
+              Currency
+              <input id="currency" maxlength="8">
+            </label>
+          </div>
+          <form id="rule-form" class="form-grid rule-form">
+            <label>
+              Source Group ID
+              <input name="sourceGroupId" required placeholder="source-vip">
+            </label>
+            <label>
+              Source Group Name
+              <input name="sourceGroupName" required placeholder="VIP Source Group">
+            </label>
+            <label>
+              Destination Group ID
+              <input name="destinationGroupId" required placeholder="dest-vip">
+            </label>
+            <label>
+              Destination Group Name
+              <input name="destinationGroupName" required placeholder="VIP Destination Group">
+            </label>
+            <label class="span-2">
+              Recipients
+              <textarea name="recipients" rows="4" placeholder="openid_001, Recipient One&#10;openid_002, Recipient Two"></textarea>
+            </label>
+            <button type="submit">Add Rule</button>
+          </form>
+          <div class="cards" id="rules"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-accounts">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Authorized Accounts</h3>
+              <p>Accounts allowed to submit events into the relay.</p>
+            </div>
+          </div>
+          <form id="account-form" class="form-grid compact">
+            <label>
+              Account ID
+              <input name="id" required placeholder="acct-e">
+            </label>
+            <label>
+              Display Name
+              <input name="name" required placeholder="Account E">
+            </label>
+            <label>
+              Role
+              <select name="role">
+                <option value="monitor">Monitor</option>
+                <option value="admin">Admin</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input name="authorized" type="checkbox" checked>
+              Authorized
+            </label>
+            <button type="submit">Add Account</button>
+          </form>
+          <div class="cards" id="accounts"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-merchant">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Merchant Integration</h3>
+              <p>Official WeChat Pay APIv3 readiness for production payouts.</p>
+            </div>
+            <button id="save-merchant" type="button">Save Merchant</button>
+          </div>
+          <div class="form-grid">
+            <label>
+              Merchant ID
+              <input id="merchant-id" placeholder="mchid">
+            </label>
+            <label>
+              AppID
+              <input id="merchant-appid" placeholder="bound appid">
+            </label>
+            <label>
+              Callback URL
+              <input id="callback-url" placeholder="https://example.com/webhooks/wechat-pay">
+            </label>
+            <label>
+              Product Permission
+              <select id="product-enabled">
+                <option value="false">Not confirmed</option>
+                <option value="true">Confirmed enabled</option>
+              </select>
+            </label>
+          </div>
+          <div class="info-block">
+            <strong>Production Provider Status</strong>
+            <p id="merchant-summary">Simulation mode is active.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-audit">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <h3>Audit Trail</h3>
+              <p>Configuration and event processing history.</p>
+            </div>
+          </div>
+          <div class="timeline" id="audit-log"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-bot-health">
+        <section class="panel health-dashboard">
+          <div class="section-head">
+            <div>
+              <h3>Bot Health</h3>
+              <p>Live pulse, readiness, throughput and system state.</p>
+            </div>
+            <span class="health-status-card" id="health-status-card">
+              <i></i>
+              <strong id="health-status-label">Starting</strong>
+            </span>
+          </div>
+
+          <div class="health-controls">
+            <button class="ghost danger" id="set-offline" type="button">Go Offline</button>
+            <button id="fix-all-issues" type="button">Fix All Issues</button>
+          </div>
+
+          <div class="health-grid">
+            <article class="vitals-card span-wide">
+              <div class="vitals-head">
+                <div>
+                  <span>Live Pulse</span>
+                  <strong id="heartbeat-label">Waiting for signal</strong>
+                </div>
+                <small id="heartbeat-time">--</small>
+              </div>
+              <div class="ecg-screen">
+                <svg viewBox="0 0 900 160" preserveAspectRatio="none" aria-label="Bot heartbeat chart">
+                  <polyline id="heartbeat-line" points=""></polyline>
+                </svg>
+                <div class="scan-line"></div>
+              </div>
+            </article>
+
+            <article class="vitals-card gauge-card">
+              <span>Readiness</span>
+              <div class="circle-gauge" id="readiness-gauge" style="--value: 0">
+                <strong id="readiness-score">0%</strong>
+              </div>
+              <p id="readiness-caption">Checking configured controls.</p>
+            </article>
+
+            <article class="vitals-card">
+              <span>Operating State</span>
+              <strong id="health-runtime">simulation</strong>
+              <p id="health-runtime-note">Basic mode is used until production integration is ready.</p>
+            </article>
+
+            <article class="vitals-card">
+              <span>Last Check</span>
+              <strong id="health-last-check">--</strong>
+              <p id="health-last-check-note">Health polling runs every 5 seconds.</p>
+            </article>
+
+            <article class="vitals-card span-wide">
+              <div class="vitals-head">
+                <div>
+                  <span>Readiness Bars</span>
+                  <strong>Configured subsystems</strong>
+                </div>
+              </div>
+              <div class="bar-stack" id="health-bars"></div>
+            </article>
+
+            <article class="vitals-card span-wide">
+              <div class="vitals-head">
+                <div>
+                  <span>Autofix Diagnostics</span>
+                  <strong id="autofix-summary">Checking issues</strong>
+                </div>
+              </div>
+              <div class="issue-list" id="issue-list"></div>
+            </article>
+
+            <article class="vitals-card">
+              <span>Transactions</span>
+              <strong id="health-tx-count">0</strong>
+              <p id="health-tx-note">Created and rejected relay decisions.</p>
+            </article>
+
+            <article class="vitals-card">
+              <span>Today Volume</span>
+              <strong id="health-volume">0.00 CNY</strong>
+              <p>Accepted relay volume today.</p>
+            </article>
+
+            <article class="vitals-card span-wide">
+              <div class="vitals-head">
+                <div>
+                  <span>Live Ticker</span>
+                  <strong>Latest bot events</strong>
+                </div>
+              </div>
+              <div class="ticker-screen" id="health-ticker"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      window.openTab = window.openTab || function (tabName) {
+        document.querySelectorAll(".tab").forEach(function (tab) {
+          tab.classList.toggle("active", tab.getAttribute("data-tab") === tabName);
+        });
+        document.querySelectorAll(".tab-panel").forEach(function (panel) {
+          panel.classList.toggle("active", panel.id === "tab-" + tabName);
+        });
+        var activeButton = document.querySelector('.tab[data-tab="' + tabName + '"]');
+        var title = document.getElementById("page-title");
+        if (activeButton && title) title.textContent = activeButton.textContent;
+      };
+    </script>
+    <script src="/app.js?v=25"></script>
+  </body>
+</html>

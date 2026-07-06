@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RedPacket Relay">
+  <rect width="512" height="512" rx="96" fill="#c92f36"/>
+  <path fill="#ffffff" d="M154 132h123c35 0 61 9 78 27 15 15 23 36 23 61 0 38-18 64-54 79l64 81h-82l-54-70h-27v70h-71V132Zm119 125c21 0 33-10 33-29 0-18-12-28-34-28h-47v57h48Z"/>
+  <path fill="#ffd56a" d="M113 96h286v42H113zM113 374h286v42H113z" opacity=".9"/>
+</svg>

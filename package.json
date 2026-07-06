@@ -1,0 +1,19 @@
+{
+  "name": "redpacket-relay",
+  "version": "1.0.0",
+  "description": "Compliant RedPacket Relay bot prototype with authorized event monitoring and payout simulation.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
+  },
+  "keywords": [
+    "redpacket",
+    "relay",
+    "wechat-pay",
+    "bot"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true
+}
