@@ -1117,6 +1117,31 @@ th {
   color: var(--muted);
 }
 
+.provider-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.provider-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.provider-check span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 700;
+}
+
 @media (max-width: 980px) {
   .sidebar {
     position: static;
@@ -1138,6 +1163,7 @@ th {
   .overview-operations,
   .wechat-layout,
   .health-grid,
+  .provider-checklist,
   .form-grid,
   .form-grid.compact {
     grid-template-columns: 1fr;

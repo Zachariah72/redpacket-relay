@@ -226,7 +226,8 @@ function openTab(tabName) {
 
 window.openTab = openTab;
 
-function readinessItems(config) {
+function readinessItems(config, providerStatus = null) {
+  const merchant = config.merchant || {};
   return [
     {
       title: "Authorized source accounts",
@@ -255,21 +256,23 @@ function readinessItems(config) {
     },
     {
       title: "Merchant credentials",
-      ready: Boolean(config.merchant.mchid && config.merchant.appid && config.merchant.productEnabled),
-      detail: config.merchant.mchid && config.merchant.appid && config.merchant.productEnabled
+      ready: Boolean(merchant.mchid && merchant.appid && merchant.productEnabled),
+      detail: merchant.mchid && merchant.appid && merchant.productEnabled
         ? "Production credentials marked ready"
         : "Optional for local online simulation"
     },
     {
       title: "API provider",
-      ready: true,
-      detail: config.mode === "simulation" ? "Simulation payout provider active" : "Production provider selected"
+      ready: merchant.providerMode === "wechatpay-v3" ? Boolean(providerStatus && providerStatus.canUseLive) : true,
+      detail: merchant.providerMode === "wechatpay-v3"
+        ? (providerStatus && providerStatus.canUseLive ? "Official WeChat Pay v3 provider ready" : "Official provider needs live credentials")
+        : "Simulation payout provider active"
     }
   ];
 }
 
-function readinessScore(config) {
-  const items = readinessItems(config);
+function readinessScore(config, providerStatus = null) {
+  const items = readinessItems(config, providerStatus);
   return items.length ? Math.round((items.filter((item) => item.ready).length / items.length) * 100) : 0;
 }
 
@@ -293,10 +296,10 @@ function renderMetrics(data) {
   setHealth(level, healthLabel(data.config, level));
 }
 
-function renderReadiness(config) {
+function renderReadiness(config, providerStatus = null) {
   replaceContent(
     "#readiness-list",
-    readinessItems(config).map((item) => {
+    readinessItems(config, providerStatus).map((item) => {
       const el = document.createElement("div");
       el.className = "check-item";
       el.append(badge(item.ready ? "ready" : "missing", item.ready ? "ready" : "missing"));
@@ -333,13 +336,18 @@ function renderRecentActivity(data) {
 }
 
 function renderConfig(config) {
+  const merchant = config.merchant || {};
   $("#target-amounts").value = config.targetAmounts.join(", ");
   $("#daily-limit").value = config.limits.maxDailyAmount;
   $("#currency").value = config.limits.currency;
-  $("#merchant-id").value = config.merchant.mchid;
-  $("#merchant-appid").value = config.merchant.appid;
-  $("#callback-url").value = config.merchant.callbackUrl;
-  $("#product-enabled").value = String(Boolean(config.merchant.productEnabled));
+  $("#provider-mode").value = merchant.providerMode || "simulation";
+  $("#merchant-id").value = merchant.mchid || "";
+  $("#merchant-appid").value = merchant.appid || "";
+  $("#merchant-serial-no").value = merchant.serialNo || "";
+  $("#callback-url").value = merchant.callbackUrl || "";
+  $("#notify-url").value = merchant.notifyUrl || "";
+  $("#transfer-endpoint").value = merchant.transferEndpoint || "";
+  $("#product-enabled").value = String(Boolean(merchant.productEnabled));
 }
 
 function renderRules(rules) {
@@ -411,13 +419,30 @@ function renderAccounts(accounts) {
   );
 }
 
-function renderMerchant(config) {
-  const missing = readinessItems(config)
-    .filter((item) => !item.ready)
-    .map((item) => item.title.toLowerCase());
-  $("#merchant-summary").textContent = missing.length
-    ? `Simulation is active. Remaining production blockers: ${missing.join(", ")}.`
-    : "Configuration is ready for a production provider implementation.";
+function renderMerchant(config, providerStatus = null) {
+  const merchant = config.merchant || {};
+  if (!providerStatus || merchant.providerMode !== "wechatpay-v3") {
+    $("#merchant-summary").textContent = "Simulation provider is active. Switch to Official WeChat Pay v3 only after merchant approval and credentials are ready.";
+    replaceContent("#provider-checklist", []);
+    return;
+  }
+
+  $("#merchant-summary").textContent = providerStatus.canUseLive
+    ? "Official WeChat Pay v3 live provider is ready. New accepted payouts will use the signed API path."
+    : `Official WeChat Pay v3 is selected but not ready. Missing: ${providerStatus.missing.join(", ")}.`;
+
+  replaceContent(
+    "#provider-checklist",
+    providerStatus.requirements.map((item) => {
+      const row = document.createElement("div");
+      row.className = "provider-check";
+      row.append(badge(item.ready ? "ready" : "missing", item.ready ? "ready" : "missing"));
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      row.append(label);
+      return row;
+    })
+  );
 }
 
 function latestAcceptedTransaction(data) {
@@ -434,7 +459,9 @@ function findRuleForTransaction(config, transaction) {
 function renderWeChatHandoff(data) {
   const tx = latestAcceptedTransaction(data);
   const rule = findRuleForTransaction(data.config, tx);
-  const merchantReady = Boolean(data.config.merchant.mchid && data.config.merchant.appid && data.config.merchant.productEnabled);
+  const merchant = data.config.merchant || {};
+  const demoMode = merchant.providerMode !== "wechatpay-v3";
+  const providerReady = Boolean(data.providerStatus && data.providerStatus.canUseLive);
   const recipientLabel = rule && rule.recipients.length
     ? `${rule.destinationGroupName} / ${rule.recipients.length} recipient(s)`
     : "No recipient route found";
@@ -445,8 +472,10 @@ function renderWeChatHandoff(data) {
   $("#wechat-handoff-summary").textContent = tx
     ? `${formatAmount(tx.amount, tx.currency)} is staged for ${tx.destinationGroupId || "the configured destination group"}.`
     : "Run a matching event to generate a red-envelope handoff preview.";
-  $("#wechat-handoff-note").textContent = merchantReady
-    ? "Merchant readiness is confirmed. Connect the official WeChat Pay provider before live delivery."
+  $("#wechat-handoff-note").textContent = demoMode
+    ? "Demo launch opens WeChat and records the handoff. It does not send a real red packet or control the WeChat screen."
+    : providerReady
+    ? "Official WeChat Pay provider is ready. Accepted payouts can run through the signed API path."
     : "Official WeChat Pay merchant credentials are required for production payout delivery.";
 
   const meta = [];
@@ -456,7 +485,8 @@ function renderWeChatHandoff(data) {
     meta.push(["Source", tx.sourceGroupId]);
     meta.push(["Destination", tx.destinationGroupId || "-"]);
     meta.push(["Provider Batch", tx.providerResult ? tx.providerResult.providerBatchId : "-"]);
-    meta.push(["Merchant Ready", merchantReady ? "Yes" : "No"]);
+    meta.push(["Mode", demoMode ? "Demo" : "Official provider"]);
+    meta.push(["Provider Ready", providerReady ? "Yes" : "No"]);
   }
 
   replaceContent(
@@ -474,7 +504,11 @@ function renderWeChatHandoff(data) {
 
   $("#copy-wechat-reference").disabled = !tx;
   $("#open-wechat-placeholder").disabled = !tx;
-  $("#open-wechat-placeholder").textContent = merchantReady ? "Initiate WeChat" : "Credentials Required";
+  $("#open-wechat-placeholder").textContent = demoMode
+    ? "Open WeChat Demo"
+    : providerReady
+      ? "Initiate WeChat"
+      : "Credentials Required";
 }
 
 function renderTransactions(transactions) {
@@ -563,7 +597,7 @@ function heartbeatPoints(values) {
 
 function renderHealthBars(config) {
   if (!$("#health-bars")) return;
-  const bars = readinessItems(config).map((item) => {
+  const bars = readinessItems(config, state.data ? state.data.providerStatus : null).map((item) => {
     const row = document.createElement("div");
     row.className = "health-bar-row";
     const label = document.createElement("div");
@@ -663,7 +697,7 @@ function renderDiagnostics() {
 function renderBotHealth() {
   if (!state.data) return;
   const config = state.data.config;
-  const score = readinessScore(config);
+  const score = readinessScore(config, state.data.providerStatus);
   const label = healthLabel(config, state.health);
   const statusCard = $("#health-status-card");
 
@@ -683,7 +717,10 @@ function renderBotHealth() {
   if ($("#heartbeat-line")) $("#heartbeat-line").setAttribute("points", heartbeatPoints(state.heartbeat));
   if ($("#readiness-gauge")) $("#readiness-gauge").style.setProperty("--value", score);
   if ($("#readiness-score")) $("#readiness-score").textContent = `${score}%`;
-  if ($("#readiness-caption")) $("#readiness-caption").textContent = `${readinessItems(config).filter((item) => item.ready).length} of ${readinessItems(config).length} controls ready.`;
+  if ($("#readiness-caption")) {
+    const items = readinessItems(config, state.data.providerStatus);
+    $("#readiness-caption").textContent = `${items.filter((item) => item.ready).length} of ${items.length} controls ready.`;
+  }
   if ($("#health-runtime")) $("#health-runtime").textContent = display(operationalStatus(config));
   if ($("#health-runtime-note")) {
     $("#health-runtime-note").textContent = state.health === "gray"
@@ -706,12 +743,12 @@ function render(data) {
   state.data = data;
   renderSelectors(data.config);
   renderMetrics(data);
-  renderReadiness(data.config);
+  renderReadiness(data.config, data.providerStatus);
   renderRecentActivity(data);
   renderConfig(data.config);
   renderRules(data.config.destinationRules);
   renderAccounts(data.config.sourceAccounts);
-  renderMerchant(data.config);
+  renderMerchant(data.config, data.providerStatus);
   renderWeChatHandoff(data);
   renderTransactions(data.transactions);
   renderEvents(data.events);
@@ -1036,8 +1073,10 @@ $("#copy-wechat-reference").addEventListener("click", async () => {
 $("#open-wechat-placeholder").addEventListener("click", async () => {
   const tx = state.data ? latestAcceptedTransaction(state.data) : null;
   if (!tx) return;
-  if (!state.data.config.merchant.productEnabled) {
-    setMessage("Complete merchant credentials before opening a production WeChat payout handoff.", true);
+  const merchant = state.data.config.merchant || {};
+  const demoMode = merchant.providerMode !== "wechatpay-v3";
+  if (!demoMode && (!state.data.providerStatus || !state.data.providerStatus.canUseLive)) {
+    setMessage("Complete official WeChat Pay live provider setup before initiating production delivery.", true);
     state.activeTab = "merchant";
     renderTabs();
     return;
@@ -1158,10 +1197,15 @@ $("#accounts").addEventListener("click", async (event) => {
 
 $("#save-merchant").addEventListener("click", async () => {
   const config = buildConfigFromState();
+  config.merchant.providerMode = $("#provider-mode").value;
   config.merchant.mchid = $("#merchant-id").value.trim();
   config.merchant.appid = $("#merchant-appid").value.trim();
+  config.merchant.serialNo = $("#merchant-serial-no").value.trim();
   config.merchant.callbackUrl = $("#callback-url").value.trim();
+  config.merchant.notifyUrl = $("#notify-url").value.trim();
+  config.merchant.transferEndpoint = $("#transfer-endpoint").value.trim();
   config.merchant.productEnabled = $("#product-enabled").value === "true";
+  config.mode = config.merchant.providerMode === "wechatpay-v3" ? "production" : "simulation";
   await saveConfig(config, "Merchant configuration saved.");
 });
 

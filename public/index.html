@@ -356,6 +356,13 @@
           </div>
           <div class="form-grid">
             <label>
+              Provider Mode
+              <select id="provider-mode">
+                <option value="simulation">Simulation</option>
+                <option value="wechatpay-v3">Official WeChat Pay v3</option>
+              </select>
+            </label>
+            <label>
               Merchant ID
               <input id="merchant-id" placeholder="mchid">
             </label>
@@ -364,8 +371,20 @@
               <input id="merchant-appid" placeholder="bound appid">
             </label>
             <label>
+              Certificate Serial No.
+              <input id="merchant-serial-no" placeholder="merchant certificate serial number">
+            </label>
+            <label>
               Callback URL
               <input id="callback-url" placeholder="https://example.com/webhooks/wechat-pay">
+            </label>
+            <label>
+              Notify URL
+              <input id="notify-url" placeholder="https://example.com/webhooks/wechat-pay/notify">
+            </label>
+            <label class="span-2">
+              Transfer Endpoint
+              <input id="transfer-endpoint" placeholder="Official WeChat Pay transfer endpoint URL">
             </label>
             <label>
               Product Permission
@@ -378,6 +397,7 @@
           <div class="info-block">
             <strong>Production Provider Status</strong>
             <p id="merchant-summary">Simulation mode is active.</p>
+            <div class="provider-checklist" id="provider-checklist"></div>
           </div>
         </section>
       </section>

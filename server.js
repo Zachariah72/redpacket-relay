@@ -2,9 +2,13 @@ const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const os = require("os");
 
 const PORT = Number(process.env.PORT || 8787);
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = process.env.REDPACKET_DATA_DIR
+  || (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? path.join(os.tmpdir(), "redpacket-relay")
+    : path.join(__dirname, "data"));
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
@@ -51,7 +55,11 @@ const defaultState = {
       mchid: "",
       appid: "",
       productEnabled: false,
-      callbackUrl: ""
+      callbackUrl: "",
+      providerMode: "simulation",
+      serialNo: "",
+      notifyUrl: "",
+      transferEndpoint: ""
     }
   },
   events: [],
@@ -79,6 +87,7 @@ async function ensureState() {
 }
 
 async function saveState(state) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
@@ -98,6 +107,13 @@ function sendDownload(res, filename, contentType, body) {
     "Content-Disposition": `attachment; filename="${filename}"`
   });
   res.end(body);
+}
+
+function publicState(state) {
+  return {
+    ...state,
+    providerStatus: getWechatProviderStatus(state)
+  };
 }
 
 function csvCell(value) {
@@ -160,12 +176,21 @@ function getOperationalStatus(state) {
   return state.config.operationalStatus || "basic";
 }
 
+function merchantConfig(state) {
+  return {
+    ...defaultState.config.merchant,
+    ...(state.config.merchant || {})
+  };
+}
+
 function ensureArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function getDiagnostics(state) {
   const config = state.config;
+  const merchant = merchantConfig(state);
+  const providerStatus = getWechatProviderStatus(state);
   const sourceAccounts = ensureArray(config.sourceAccounts);
   const destinationRules = ensureArray(config.destinationRules);
   const targetAmounts = ensureArray(config.targetAmounts);
@@ -238,7 +263,7 @@ function getDiagnostics(state) {
     });
   }
 
-  if (!config.merchant.mchid || !config.merchant.appid || !config.merchant.productEnabled) {
+  if (!merchant.mchid || !merchant.appid || !merchant.productEnabled) {
     warnings.push({
       id: "merchant-not-ready",
       severity: "info",
@@ -248,11 +273,179 @@ function getDiagnostics(state) {
     });
   }
 
+  if (merchant.providerMode === "wechatpay-v3" && !providerStatus.canUseLive) {
+    issues.push({
+      id: "wechatpay-provider-not-ready",
+      severity: "critical",
+      title: "WeChat Pay provider is not ready",
+      detail: `Missing live requirement(s): ${providerStatus.missing.join(", ")}.`,
+      fix: "Set the required merchant fields and environment variables before using live payout mode."
+    });
+  }
+
   return {
     ok: issues.filter((issue) => issue.severity === "critical").length === 0,
     issues,
     warnings,
     checkedAt: new Date().toISOString()
+  };
+}
+
+function envFlag(name) {
+  return String(process.env[name] || "").toLowerCase() === "true";
+}
+
+function envPresent(name) {
+  return Boolean(String(process.env[name] || "").trim());
+}
+
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function getWechatProviderStatus(state) {
+  const merchant = merchantConfig(state);
+  const liveEnabled = envFlag("WECHAT_PAY_ENABLE_LIVE");
+  const privateKeyConfigured = envPresent("WECHAT_PAY_PRIVATE_KEY") || envPresent("WECHAT_PAY_PRIVATE_KEY_PATH");
+  const transferEndpoint = merchant.transferEndpoint || process.env.WECHAT_PAY_TRANSFER_ENDPOINT || "";
+  const requirements = [
+    { id: "providerMode", label: "Merchant provider mode is WeChat Pay v3", ready: merchant.providerMode === "wechatpay-v3" },
+    { id: "productEnabled", label: "WeChat Pay product permission confirmed", ready: Boolean(merchant.productEnabled) },
+    { id: "mchid", label: "Merchant ID configured", ready: Boolean(merchant.mchid || process.env.WECHAT_PAY_MCHID) },
+    { id: "appid", label: "AppID configured", ready: Boolean(merchant.appid || process.env.WECHAT_PAY_APPID) },
+    { id: "serialNo", label: "Merchant certificate serial number configured", ready: Boolean(merchant.serialNo || process.env.WECHAT_PAY_SERIAL_NO) },
+    { id: "privateKey", label: "Merchant private key configured in environment", ready: privateKeyConfigured },
+    { id: "apiV3Key", label: "API v3 key configured in environment", ready: envPresent("WECHAT_PAY_API_V3_KEY") },
+    { id: "notifyUrl", label: "Notify URL configured", ready: Boolean(merchant.notifyUrl || merchant.callbackUrl || process.env.WECHAT_PAY_NOTIFY_URL) },
+    { id: "transferEndpoint", label: "Valid HTTPS live transfer endpoint configured", ready: isHttpsUrl(transferEndpoint) },
+    { id: "liveGuard", label: "Live payout guard enabled", ready: liveEnabled }
+  ];
+  const missing = requirements.filter((item) => !item.ready).map((item) => item.label);
+
+  return {
+    provider: merchant.providerMode || "simulation",
+    liveEnabled,
+    canUseLive: requirements.every((item) => item.ready),
+    requirements,
+    missing,
+    merchantIdSource: merchant.mchid ? "config" : envPresent("WECHAT_PAY_MCHID") ? "environment" : "missing",
+    appIdSource: merchant.appid ? "config" : envPresent("WECHAT_PAY_APPID") ? "environment" : "missing",
+    checkedAt: new Date().toISOString()
+  };
+}
+
+async function readWechatPrivateKey() {
+  if (process.env.WECHAT_PAY_PRIVATE_KEY) {
+    return process.env.WECHAT_PAY_PRIVATE_KEY.replace(/\\n/g, "\n");
+  }
+  if (process.env.WECHAT_PAY_PRIVATE_KEY_PATH) {
+    return fs.readFile(process.env.WECHAT_PAY_PRIVATE_KEY_PATH, "utf8");
+  }
+  throw new Error("WECHAT_PAY_PRIVATE_KEY or WECHAT_PAY_PRIVATE_KEY_PATH is required.");
+}
+
+function wechatRequestTarget(endpoint) {
+  const url = new URL(endpoint);
+  return `${url.pathname}${url.search}`;
+}
+
+async function createWechatAuthorization({ method, endpoint, body, merchant }) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const bodyText = body ? JSON.stringify(body) : "";
+  const message = `${method}\n${wechatRequestTarget(endpoint)}\n${timestamp}\n${nonce}\n${bodyText}\n`;
+  const privateKey = await readWechatPrivateKey();
+  const signature = crypto.createSign("RSA-SHA256").update(message).end().sign(privateKey, "base64");
+  const mchid = merchant.mchid || process.env.WECHAT_PAY_MCHID;
+  const serialNo = merchant.serialNo || process.env.WECHAT_PAY_SERIAL_NO;
+
+  return `WECHATPAY2-SHA256-RSA2048 mchid="${mchid}",nonce_str="${nonce}",signature="${signature}",timestamp="${timestamp}",serial_no="${serialNo}"`;
+}
+
+function buildWechatTransferBody({ event, rule, amount, currency, merchant }) {
+  const cents = Math.round(Number(amount) * 100);
+  const baseRecipientAmount = Math.floor(cents / rule.recipients.length);
+  const remainder = cents - (baseRecipientAmount * rule.recipients.length);
+  return {
+    appid: merchant.appid || process.env.WECHAT_PAY_APPID,
+    out_batch_no: event.externalId,
+    batch_name: "RedPacket Relay payout",
+    batch_remark: "Authorized red-packet relay payout",
+    total_amount: cents,
+    total_num: rule.recipients.length,
+    transfer_detail_list: rule.recipients.map((recipient, index) => ({
+      out_detail_no: `${event.externalId}-${index + 1}`,
+      transfer_amount: baseRecipientAmount + (index === 0 ? remainder : 0),
+      transfer_remark: "RedPacket Relay recipient payout",
+      openid: recipient.openid
+    })),
+    notify_url: merchant.notifyUrl || merchant.callbackUrl || process.env.WECHAT_PAY_NOTIFY_URL,
+    currency
+  };
+}
+
+async function createWechatPayTransfer({ state, event, rule, amount, currency }) {
+  const merchant = merchantConfig(state);
+  const providerStatus = getWechatProviderStatus(state);
+  if (!providerStatus.canUseLive) {
+    return {
+      ok: false,
+      reason: `WeChat Pay live provider is not ready: ${providerStatus.missing.join(", ")}.`
+    };
+  }
+
+  const endpoint = merchant.transferEndpoint || process.env.WECHAT_PAY_TRANSFER_ENDPOINT;
+  const body = buildWechatTransferBody({ event, rule, amount, currency, merchant });
+  const authorization = await createWechatAuthorization({
+    method: "POST",
+    endpoint,
+    body,
+    merchant
+  });
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Authorization": authorization,
+      "Content-Type": "application/json",
+      "User-Agent": "RedPacket-Relay/1.0"
+    },
+    body: JSON.stringify(body)
+  });
+  const responseText = await response.text();
+  let responseBody = {};
+  try {
+    responseBody = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    responseBody = { raw: responseText };
+  }
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason: `WeChat Pay provider rejected the transfer request (${response.status}).`,
+      providerResponse: responseBody
+    };
+  }
+
+  return {
+    ok: true,
+    payout: {
+      provider: "wechatpay-v3",
+      providerBatchId: responseBody.batch_id || responseBody.out_batch_no || event.externalId,
+      status: responseBody.batch_status || "submitted",
+      message: "Official WeChat Pay v3 transfer request submitted.",
+      destinationGroupId: rule.destinationGroupId,
+      recipientCount: rule.recipients.length,
+      amount,
+      currency,
+      reference: event.externalId,
+      providerResponse: responseBody
+    }
   };
 }
 
@@ -342,8 +535,8 @@ async function createAdminAlert() {
 
 async function initiateWeChatHandoff(input = {}) {
   const state = await ensureState();
-  const merchant = state.config.merchant || {};
-  const merchantReady = Boolean(merchant.mchid && merchant.appid && merchant.productEnabled);
+  const merchant = merchantConfig(state);
+  const providerStatus = getWechatProviderStatus(state);
   const transaction = state.transactions.find((tx) =>
     tx.status === "created" && (!input.externalId || tx.externalId === input.externalId)
   );
@@ -355,18 +548,21 @@ async function initiateWeChatHandoff(input = {}) {
     };
   }
 
-  if (!merchantReady) {
+  if (merchant.providerMode === "wechatpay-v3" && !providerStatus.canUseLive) {
     return {
       status: 409,
-      payload: { error: "Merchant credentials must be completed before WeChat handoff initiation." }
+      payload: { error: `WeChat Pay live provider is not ready: ${providerStatus.missing.join(", ")}.` }
     };
   }
 
   const now = new Date().toISOString();
+  const demoMode = merchant.providerMode !== "wechatpay-v3";
   state.auditLog.unshift({
     id: createId("audit"),
-    action: "wechat_handoff_initiated",
-    message: `${transaction.externalId}: WeChat handoff initiation requested.`,
+    action: demoMode ? "wechat_demo_opened" : "wechat_handoff_initiated",
+    message: demoMode
+      ? `${transaction.externalId}: WeChat demo launch requested. No real red packet was sent.`
+      : `${transaction.externalId}: WeChat handoff initiation requested.`,
     createdAt: now
   });
   state.auditLog = state.auditLog.slice(0, 200);
@@ -377,7 +573,10 @@ async function initiateWeChatHandoff(input = {}) {
     payload: {
       ok: true,
       launchUri: "weixin://",
-      message: "WeChat launch requested. Complete payout delivery through the official WeChat Pay provider flow.",
+      mode: demoMode ? "demo" : "live-ready",
+      message: demoMode
+        ? "WeChat launch requested for demo handoff. No real red packet was sent."
+        : "WeChat Pay live provider is configured. Official payout delivery should run through the signed API request path.",
       transaction
     }
   };
@@ -394,6 +593,18 @@ function simulatePayout({ event, rule, amount, currency }) {
     amount,
     currency,
     reference: event.externalId
+  };
+}
+
+async function createProviderPayout({ state, event, rule, amount, currency }) {
+  const merchant = merchantConfig(state);
+  if (merchant.providerMode === "wechatpay-v3" || state.config.mode === "production") {
+    return createWechatPayTransfer({ state, event, rule, amount, currency });
+  }
+
+  return {
+    ok: true,
+    payout: simulatePayout({ event, rule, amount, currency })
   };
 }
 
@@ -445,9 +656,14 @@ async function ingestEvent(input) {
   } else if (!rule.recipients.length) {
     reason = "Destination rule has no recipients.";
   } else {
-    decision = "matched";
-    reason = "Target matched and payout created.";
-    payout = simulatePayout({ event, rule, amount, currency: event.currency });
+    const providerResult = await createProviderPayout({ state, event, rule, amount, currency: event.currency });
+    if (providerResult.ok) {
+      decision = "matched";
+      reason = "Target matched and payout created.";
+      payout = providerResult.payout;
+    } else {
+      reason = providerResult.reason || "Payout provider did not create the transfer.";
+    }
   }
 
   const transaction = {
@@ -497,6 +713,10 @@ async function updateConfig(input) {
   nextConfig.operationalStatus = ["basic", "online", "offline"].includes(nextConfig.operationalStatus)
     ? nextConfig.operationalStatus
     : "basic";
+  nextConfig.mode = ["simulation", "production"].includes(nextConfig.mode) ? nextConfig.mode : "simulation";
+  nextConfig.merchant.providerMode = ["simulation", "wechatpay-v3"].includes(nextConfig.merchant.providerMode)
+    ? nextConfig.merchant.providerMode
+    : "simulation";
   nextConfig.sourceAccounts = Array.isArray(nextConfig.sourceAccounts) ? nextConfig.sourceAccounts : [];
   nextConfig.destinationRules = Array.isArray(nextConfig.destinationRules) ? nextConfig.destinationRules : [];
 
@@ -513,7 +733,7 @@ async function updateConfig(input) {
 
 async function resetDemo() {
   await saveState(defaultState);
-  return structuredClone(defaultState);
+  return publicState(structuredClone(defaultState));
 }
 
 async function serveStatic(req, res) {
@@ -542,17 +762,25 @@ async function router(req, res) {
 
     if (url.pathname === "/api/health") {
       const state = await ensureState();
+      const providerStatus = getWechatProviderStatus(state);
       sendJson(res, 200, {
         ok: getOperationalStatus(state) !== "offline",
         service: "RedPacket Relay",
         mode: state.config.mode,
-        operationalStatus: getOperationalStatus(state)
+        operationalStatus: getOperationalStatus(state),
+        provider: providerStatus.provider,
+        providerReady: providerStatus.canUseLive
       });
       return;
     }
 
     if (url.pathname === "/api/state" && req.method === "GET") {
-      sendJson(res, 200, await ensureState());
+      sendJson(res, 200, publicState(await ensureState()));
+      return;
+    }
+
+    if (url.pathname === "/api/wechat/provider-status" && req.method === "GET") {
+      sendJson(res, 200, getWechatProviderStatus(await ensureState()));
       return;
     }
 
